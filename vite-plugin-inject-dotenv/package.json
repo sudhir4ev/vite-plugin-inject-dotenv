@@ -1,0 +1,20 @@
+{
+  "name": "vite-plugin-inject-dotenv",
+  "version": "0.0.1",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./index.mjs",
+      "require": "./index.js"
+    }
+  },
+  "dependencies": {
+    "babel-plugin-inline-dotenv": "^1.7.0",
+    "tempy": "^3.1.0",
+    "tmp": "^0.2.1"
+  },
+  "devDependencies": {
+    "@types/tmp": "^0.2.4"
+  }
+}
