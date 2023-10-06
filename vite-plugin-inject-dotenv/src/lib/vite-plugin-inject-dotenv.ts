@@ -3,55 +3,18 @@ import MagicString from 'magic-string';
 import * as fs from 'fs';
 import path from 'path';
 import { resolveDotEnv } from './resolveDotEnv';
-import generate from '@babel/generator';
-import { valueToNode } from '@babel/types';
-import { parse } from '@babel/parser';
-import traverse from '@babel/traverse';
 import { buildPlaceholderEnvConfig } from './buildPlaceholderEnvConfig';
+import { compileEnvVars } from './compileEnvVars';
 import { EnvVar } from './types';
 
 const injectableEnvVarsCache: { [key: string]: EnvVar } = {};
 const injectableEnvFileCache: { [key: string]: string } = {};
 const injectableEnvPlaceholder: EnvVar = {};
 
-async function injectEnvVars(code: string, envVars: EnvVar) {
+async function injectEnvPlaceholders(code: string, envVars: EnvVar) {
   const substituted = await compileEnvVars(code, 'process_env');
   const customEnv = `const process_env = ${JSON.stringify(envVars, null, 2)};`;
   return `${customEnv}\n\n${substituted.code}`;
-}
-
-async function compileEnvVars(code: string, privateEnvVarName: string) {
-  const ast = parse(code, { sourceType: 'module' });
-
-  traverse(ast, {
-    MemberExpression(path) {
-      try {
-        // handle `import.meta.env` format
-        const { node } = path;
-        if (
-          node.object.type === 'MetaProperty' &&
-          node.object.meta.name === 'import' &&
-          node.object.property.name === 'meta' &&
-          node.property.type === 'Identifier' &&
-          node.property.name === 'env'
-        ) {
-          path.replaceWithSourceString(privateEnvVarName);
-        }
-
-        // handle `process.env` format
-        if (path.get('object').matchesPattern('process.env')) {
-          const envKey = path.toComputedKey();
-          path.replaceWith(
-            valueToNode(`${privateEnvVarName}.${(envKey as any)?.value}`)
-          );
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    },
-  });
-
-  return generate(ast, {}, '');
 }
 
 export function vitePluginInjectDotenv(options: {
@@ -78,6 +41,10 @@ export function vitePluginInjectDotenv(options: {
           rollupOptions: {
             output: {
               manualChunks: (id) => {
+
+                /**
+                 * force injectable env to be a separate file
+                 */
                 if (id.endsWith(options.input)) {
                   return injectFileName;
                 }
@@ -88,6 +55,12 @@ export function vitePluginInjectDotenv(options: {
       };
     },
     async transform(code, id) {
+      /**
+       * - Resolve all available .env files
+       * - create placeholder env vars, for substitution later
+       * - save env vars in cache for later use
+       */
+
       if (!id.includes(options.input)) return code;
       const envConfigs = await resolveDotEnv({
         cwd,
@@ -99,15 +72,7 @@ export function vitePluginInjectDotenv(options: {
         injectableEnvPlaceholder[key] = value;
       });
 
-      /**
-       * - build placeholder env file using rollup
-       * - for each detected env
-       * - build env file for each env
-       * - read processed file and save contents in cache
-       * - in `writeBundle` create code.<env>.js file for each env entry in cache
-       */
-
-      const newCode = await injectEnvVars(code, placeholderEnv);
+      const newCode = await injectEnvPlaceholders(code, placeholderEnv);
 
       await Promise.all(
         Object.entries(envConfigs).map(async ([envName, allConfig]) => {
@@ -119,25 +84,41 @@ export function vitePluginInjectDotenv(options: {
       return newCode;
     },
     writeBundle() {
+      /**
+       * write `inject-env-**.<env>.js` for each env in output folder
+       */
       Object.entries(injectableEnvFileCache).forEach(([fileName, code]) => {
         fs.writeFileSync(path.resolve(root, outDir) + '/' + fileName, code);
       });
     },
     generateBundle(_, bundle) {
+      /**
+       * use the compiled env file to generate code for each env.
+       * i.e. placeholder values are substituted with actual vars for each env
+       *
+       * these code strings along with the asset name for each env are
+       * saved in `injectableEnvFileCache`.
+       */
       const injectableEntry = Object.entries(bundle).find((entry) => {
         const chunk: any = entry[1];
         return chunkMatchesInput(chunk, options.input);
       });
       if (!injectableEntry) return;
-      const [runtimeAssetName, chunk] = injectableEntry;
+      const runtimeAssetName: string = injectableEntry[0];
+      const chunk: any = injectableEntry[1];
 
       Object.entries(injectableEnvVarsCache).forEach(([envName, envConfig]) => {
         const outFileName = `${runtimeAssetName}.${envName}.js`;
-        const code: string = (chunk as any).code;
+        const code: string = chunk.code;
         const newCode = substituteEnvVars(code, envConfig);
 
         injectableEnvFileCache[outFileName] = newCode;
       });
+
+      /**
+       * replace placeholders in production build with production env vars
+       */
+      chunk.code = injectableEnvFileCache[`${runtimeAssetName}.production.js`];
     },
   };
 }
