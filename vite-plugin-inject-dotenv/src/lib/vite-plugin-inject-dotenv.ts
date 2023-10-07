@@ -15,13 +15,7 @@ async function injectEnvPlaceholders(code: string, envVars: EnvVar) {
   return `${customEnv}\n\n${substituted.code}`;
 }
 
-export function vitePluginInjectDotenv(options: {
-  input: string;
-  injectFileName?: string;
-  dir?: string;
-  bakeEnvScriptFileName?: string;
-  inlineGeneratedEnv?: boolean;
-}): Plugin {
+export function vitePluginInjectDotenv(options: InjectDotenvOptions): Plugin {
   let outDir = '';
   let root = '';
   let injectableEnvFile = '';
@@ -100,7 +94,7 @@ export function vitePluginInjectDotenv(options: {
       const bakeScriptName = options.bakeEnvScriptFileName || 'bakeEnv.sh';
       if (options.inlineGeneratedEnv) {
         fs.writeFileSync(
-          outputPath + '/' +bakeScriptName,
+          outputPath + '/' + bakeScriptName,
           buildBakeEnvScript({
             targetFile: injectableEnvFile,
             injectableEnvFileCache,
@@ -189,3 +183,40 @@ function chunkMatchesInput(chunk: any, entryFile: string) {
 
   return moduleName.endsWith(entryFile);
 }
+
+type InjectDotenvOptions = {
+  /**
+   * source file using env vars.
+   * Supports: both `import.meta.env` and `process.env` formats
+   */
+  input: string;
+
+  /**
+   * name used to create the asset file for source file provided in `options.input`
+   * default: 'inject-env-[hash].js'
+   */
+  injectFileName?: string;
+
+  /**
+   * folder containing all `.env` files
+   * defaults to project root
+   */
+  dir?: string;
+
+  /**
+   * name of the bash script generated which can used to create custom assets for given env
+   * default: `bakeEnv.sh`
+   */
+  bakeEnvScriptFileName?: string;
+
+  /**
+   * Inline asset files within `bakeEnv.sh`
+   *
+   * By default, the plugin creates separate asset files for each env.
+   * These can be used post build to replace the original env asset file.
+   *
+   * With this option set to true, No separate asset files are generated.
+   * All asset file contents for each env are placed within `bakeEnv.sh` file.
+   */
+  inlineGeneratedEnv?: boolean;
+};
