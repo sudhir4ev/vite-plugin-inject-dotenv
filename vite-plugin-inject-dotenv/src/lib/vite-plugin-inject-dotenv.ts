@@ -6,10 +6,8 @@ import { resolveDotEnv } from './resolveDotEnv';
 import { buildPlaceholderEnvConfig } from './buildPlaceholderEnvConfig';
 import { compileEnvVars } from './compileEnvVars';
 import { EnvVar } from './types';
-
-const injectableEnvVarsCache: { [key: string]: EnvVar } = {};
-const injectableEnvFileCache: { [key: string]: string } = {};
-const injectableEnvPlaceholder: EnvVar = {};
+import { buildBakeEnvScript } from './buildBakeEnvScript';
+import { generateEnvReplaceScript } from './generateEnvReplaceScript';
 
 async function injectEnvPlaceholders(code: string, envVars: EnvVar) {
   const substituted = await compileEnvVars(code, 'process_env');
@@ -21,9 +19,21 @@ export function vitePluginInjectDotenv(options: {
   input: string;
   injectFileName?: string;
   dir?: string;
+  bakeEnvScriptFileName?: string;
+  inlineGeneratedEnv?: boolean;
 }): Plugin {
   let outDir = '';
   let root = '';
+  let injectableEnvFile = '';
+  const injectableEnvVarsCache: { [key: string]: EnvVar } = {};
+  const injectableEnvFileCache: {
+    [key: string]: {
+      fileName: string;
+      code: string;
+    };
+  } = {};
+  const injectableEnvPlaceholder: EnvVar = {};
+
   const cwd = options.dir || __dirname;
   const injectFileName = options.injectFileName || 'inject-env';
 
@@ -41,7 +51,6 @@ export function vitePluginInjectDotenv(options: {
           rollupOptions: {
             output: {
               manualChunks: (id) => {
-
                 /**
                  * force injectable env to be a separate file
                  */
@@ -87,9 +96,37 @@ export function vitePluginInjectDotenv(options: {
       /**
        * write `inject-env-**.<env>.js` for each env in output folder
        */
-      Object.entries(injectableEnvFileCache).forEach(([fileName, code]) => {
-        fs.writeFileSync(path.resolve(root, outDir) + '/' + fileName, code);
-      });
+      const outputPath = path.resolve(root, outDir);
+      const bakeScriptName = options.bakeEnvScriptFileName || 'bakeEnv.sh';
+      if (options.inlineGeneratedEnv) {
+        fs.writeFileSync(
+          outputPath + '/' +bakeScriptName,
+          buildBakeEnvScript({
+            targetFile: injectableEnvFile,
+            injectableEnvFileCache,
+          })
+        );
+      } else {
+        /**
+         * Generate injectable env files
+         */
+        Object.entries(injectableEnvFileCache).forEach(
+          ([envName, { fileName, code }]) => {
+            fs.writeFileSync(outputPath + '/' + fileName, code);
+          }
+        );
+
+        /**
+         * create bake env script
+         */
+        fs.writeFileSync(
+          outputPath + '/' + bakeScriptName,
+          generateEnvReplaceScript({
+            targetFile: injectableEnvFile,
+            injectableEnvVarsCache,
+          })
+        );
+      }
     },
     generateBundle(_, bundle) {
       /**
@@ -104,26 +141,39 @@ export function vitePluginInjectDotenv(options: {
         return chunkMatchesInput(chunk, options.input);
       });
       if (!injectableEntry) return;
-      const runtimeAssetName: string = injectableEntry[0];
+      const injectableAssetName: string = injectableEntry[0];
       const chunk: any = injectableEntry[1];
 
       Object.entries(injectableEnvVarsCache).forEach(([envName, envConfig]) => {
-        const outFileName = `${runtimeAssetName}.${envName}.js`;
+        const outFileName = `${injectableAssetName}.${envName}.js`;
         const code: string = chunk.code;
-        const newCode = substituteEnvVars(code, envConfig);
+        const newCode = substituteEnvVars(
+          code,
+          envConfig,
+          injectableEnvPlaceholder
+        );
 
-        injectableEnvFileCache[outFileName] = newCode;
+        injectableEnvFileCache[envName] = {
+          fileName: outFileName,
+          code: newCode,
+        };
       });
 
       /**
        * replace placeholders in production build with production env vars
        */
-      chunk.code = injectableEnvFileCache[`${runtimeAssetName}.production.js`];
+      chunk.code = injectableEnvFileCache['production'].code;
+
+      injectableEnvFile = injectableAssetName;
     },
   };
 }
 
-function substituteEnvVars(code: string, placeholderEnvMap: EnvVar) {
+function substituteEnvVars(
+  code: string,
+  placeholderEnvMap: EnvVar,
+  injectableEnvPlaceholder: EnvVar
+) {
   let newCode = new MagicString(code);
   Object.entries(placeholderEnvMap).forEach(([envKey, value]) => {
     const placeholderKey = injectableEnvPlaceholder[envKey];
