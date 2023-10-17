@@ -9,12 +9,6 @@ import { EnvVar } from './types';
 import { buildBakeEnvScript } from './buildBakeEnvScript';
 import { generateEnvReplaceScript } from './generateEnvReplaceScript';
 
-async function injectEnvPlaceholders(code: string, envVars: EnvVar) {
-  const substituted = await compileEnvVars(code, 'process_env');
-  const customEnv = `const process_env = ${JSON.stringify(envVars, null, 2)};`;
-  return `${customEnv}\n\n${substituted.code}`;
-}
-
 export function vitePluginInjectDotenv(options: InjectDotenvOptions): Plugin {
   let outDir = '';
   let root = '';
@@ -75,7 +69,15 @@ export function vitePluginInjectDotenv(options: InjectDotenvOptions): Plugin {
         injectableEnvPlaceholder[key] = value;
       });
 
-      const newCode = await injectEnvPlaceholders(code, placeholderEnv);
+      const substituted = await compileEnvVars(code, 'process_env', {
+        plugins: options.babelPlugins,
+      });
+      const customEnv = `const process_env = ${JSON.stringify(
+        placeholderEnv,
+        null,
+        2
+      )};`;
+      const newCode = `${customEnv}\n\n${substituted.code}`;
 
       await Promise.all(
         Object.entries(envConfigs).map(async ([envName, allConfig]) => {
@@ -219,4 +221,15 @@ type InjectDotenvOptions = {
    * All asset file contents for each env are placed within `bakeEnv.sh` file.
    */
   inlineGeneratedEnv?: boolean;
+
+  /**
+   * babel plugins to compile env chunk
+   *
+   * @example
+   * vitePluginInjectDotenv({
+   *   input: 'src/env.ts',
+   *   babelPlugins: ['@babel/plugin-transform-typescript']
+   * })
+   */
+  babelPlugins?: string[];
 };

@@ -1,8 +1,8 @@
 import { type Dirent } from 'fs';
 import * as fs from 'fs';
-import path from 'path';
-import dotenv from 'dotenv';
-import lodash from 'lodash';
+import * as path from 'path';
+import * as dotenv from 'dotenv';
+import * as lodash from 'lodash';
 
 export async function resolveDotEnv(options: ResolveDotEnvOptions) {
   const allEntries = fs.readdirSync(options.cwd, {
