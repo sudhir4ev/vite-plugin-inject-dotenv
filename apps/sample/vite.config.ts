@@ -23,7 +23,7 @@ export default defineConfig({
       input: 'src/env.ts',
       dir: __dirname,
       inlineGeneratedEnv: true,
-      priority: 'shell',
+      sourcePriority: 'shell',
       shellEnvMap: {
         VITE_API_URL: '___VITE_API_URL'
       }

@@ -11,6 +11,11 @@ import { generateScriptFromSourceShell } from './generateScriptFromSourceShell';
 import { substituteEnvVars } from './substitute-env-vars';
 import { chunkMatchesInput } from './chunk-matches-input';
 
+/**
+ * Enables env variables substitution into your asset bundle.
+ * The substitution is done by a shell script which is generated as part of
+ * the build artefact.
+ */
 export function vitePluginInjectDotenv(options: InjectDotenvOptions): Plugin {
   let outDir = '';
   let root = '';
@@ -99,7 +104,7 @@ export function vitePluginInjectDotenv(options: InjectDotenvOptions): Plugin {
       const outputPath = path.resolve(root, outDir);
       const bakeScriptName = options.bakeEnvScriptFileName || 'bakeEnv.sh';
       if (options.inlineGeneratedEnv) {
-        const sourcePriority = options.priority || 'dotenv';
+        const sourcePriority = options.sourcePriority || 'dotenv';
         switch (sourcePriority) {
           case 'dotenv':
             fs.writeFileSync(
@@ -235,7 +240,8 @@ type InjectDotenvOptions = {
   injectFileName?: string;
 
   /**
-   * folder containing all `.env` files
+   * Root directory.
+   * Should contain all the `.env` files
    * defaults to project root
    */
   dir?: string;
@@ -269,7 +275,16 @@ type InjectDotenvOptions = {
    */
   babelPlugins?: string[];
 
-  priority?: 'shell' | 'dotenv';
+  /**
+   * Pick your choice for source for the env variables.
+   * Applicable only when `inlineGeneratedEnv` is true
+   */
+  sourcePriority?: 'shell' | 'dotenv';
 
+  /**
+   * Mapping between shell env variable and env vars used in code.
+   * When no mapping is provided, the script uses the same shell env variable
+   * names as those found in `.env.example`
+   */
   shellEnvMap?: { [envVar: string]: string };
 };
