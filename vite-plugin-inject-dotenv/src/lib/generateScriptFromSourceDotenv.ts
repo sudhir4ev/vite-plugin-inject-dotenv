@@ -1,4 +1,4 @@
-export function buildBakeEnvScript(options: {
+export function generateScriptFromSourceDotenv(options: {
   targetFile: string;
   injectableEnvFileCache: {
     [key: string]: {

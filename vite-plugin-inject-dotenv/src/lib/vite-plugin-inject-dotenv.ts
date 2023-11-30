@@ -1,18 +1,21 @@
 import { Plugin } from 'vite';
-import MagicString from 'magic-string';
 import * as fs from 'fs';
 import path from 'path';
 import { resolveDotEnv } from './resolveDotEnv';
 import { buildPlaceholderEnvConfig } from './buildPlaceholderEnvConfig';
 import { compileEnvVars } from './compileEnvVars';
 import { EnvVar } from './types';
-import { buildBakeEnvScript } from './buildBakeEnvScript';
+import { generateScriptFromSourceDotenv } from './generateScriptFromSourceDotenv';
 import { generateEnvReplaceScript } from './generateEnvReplaceScript';
+import { generateScriptFromSourceShell } from './generateScriptFromSourceShell';
+import { substituteEnvVars } from './substitute-env-vars';
+import { chunkMatchesInput } from './chunk-matches-input';
 
 export function vitePluginInjectDotenv(options: InjectDotenvOptions): Plugin {
   let outDir = '';
   let root = '';
   let injectableEnvFile = '';
+  let placeholderEnv = {} as EnvVar;
   const injectableEnvVarsCache: { [key: string]: EnvVar } = {};
   const injectableEnvFileCache: {
     [key: string]: {
@@ -62,9 +65,10 @@ export function vitePluginInjectDotenv(options: InjectDotenvOptions): Plugin {
       const envConfigs = await resolveDotEnv({
         cwd,
       });
-      const placeholderEnv = buildPlaceholderEnvConfig(
+      placeholderEnv = buildPlaceholderEnvConfig(
         envConfigs['production'].resolved
       );
+
       Object.entries(placeholderEnv).forEach(([key, value]) => {
         injectableEnvPlaceholder[key] = value;
       });
@@ -95,19 +99,66 @@ export function vitePluginInjectDotenv(options: InjectDotenvOptions): Plugin {
       const outputPath = path.resolve(root, outDir);
       const bakeScriptName = options.bakeEnvScriptFileName || 'bakeEnv.sh';
       if (options.inlineGeneratedEnv) {
-        fs.writeFileSync(
-          outputPath + '/' + bakeScriptName,
-          buildBakeEnvScript({
-            targetFile: injectableEnvFile,
-            injectableEnvFileCache,
-          })
-        );
+        const sourcePriority = options.priority || 'dotenv';
+        switch (sourcePriority) {
+          case 'dotenv':
+            fs.writeFileSync(
+              outputPath + '/' + bakeScriptName,
+              generateScriptFromSourceDotenv({
+                targetFile: injectableEnvFile,
+                injectableEnvFileCache,
+              })
+            );
+            break;
+          case 'shell': {
+            const sanitizedShellEnvMap = Object.entries(
+              options.shellEnvMap || {}
+            ).reduce((acc, entry) => {
+              const [envVarName, shellVarName] = entry;
+              acc[envVarName] = `$${shellVarName}`;
+              return acc;
+            }, {} as EnvVar);
+
+            const defaultEnvSubstPlaceholders = Object.keys(
+              placeholderEnv
+            ).reduce((acc, key) => {
+              acc[key] = `$${key}`;
+              return acc;
+            }, {} as EnvVar);
+
+            const shellEnvMap = {
+              ...defaultEnvSubstPlaceholders,
+              ...sanitizedShellEnvMap,
+            };
+
+            const shellCodeTemplate = substituteEnvVars(
+              injectableEnvFileCache['raw'].code,
+              shellEnvMap,
+              injectableEnvPlaceholder
+            );
+            fs.writeFileSync(
+              outputPath + '/source_shell-template.js',
+              shellCodeTemplate
+            );
+            fs.writeFileSync(
+              outputPath + '/' + bakeScriptName,
+              generateScriptFromSourceShell({
+                placeholderEnv: placeholderEnv,
+                targetFile: injectableEnvFile,
+                shellEnvMap: options.shellEnvMap,
+                shellCodeTemplateFile: 'source_shell-template.js',
+              })
+            );
+            break;
+          }
+        }
       } else {
         /**
          * Generate injectable env files
          */
         Object.entries(injectableEnvFileCache).forEach(
           ([envName, { fileName, code }]) => {
+            if (fileName === 'raw') return;
             fs.writeFileSync(outputPath + '/' + fileName, code);
           }
         );
@@ -140,6 +191,11 @@ export function vitePluginInjectDotenv(options: InjectDotenvOptions): Plugin {
       const injectableAssetName: string = injectableEntry[0];
       const chunk: any = injectableEntry[1];
 
+      injectableEnvFileCache['raw'] = {
+        fileName: 'raw',
+        code: chunk.code,
+      };
+
       Object.entries(injectableEnvVarsCache).forEach(([envName, envConfig]) => {
         const outFileName = `${injectableAssetName}.${envName}.js`;
         const code: string = chunk.code;
@@ -163,27 +219,6 @@ export function vitePluginInjectDotenv(options: InjectDotenvOptions): Plugin {
       injectableEnvFile = injectableAssetName;
     },
   };
-}
-
-function substituteEnvVars(
-  code: string,
-  placeholderEnvMap: EnvVar,
-  injectableEnvPlaceholder: EnvVar
-) {
-  let newCode = new MagicString(code);
-  Object.entries(placeholderEnvMap).forEach(([envKey, value]) => {
-    const placeholderKey = injectableEnvPlaceholder[envKey];
-    newCode = newCode.replaceAll(placeholderKey, value);
-  });
-  return newCode.toString();
-}
-
-function chunkMatchesInput(chunk: any, entryFile: string) {
-  const moduleIds = chunk.moduleIds || [];
-  if (moduleIds.length !== 1) return;
-  const moduleName: string = moduleIds[0];
-
-  return moduleName.endsWith(entryFile);
 }
 
 type InjectDotenvOptions = {
@@ -213,6 +248,7 @@ type InjectDotenvOptions = {
 
   /**
    * Inline asset files within `bakeEnv.sh`
+   * default: false
    *
    * By default, the plugin creates separate asset files for each env.
    * These can be used post build to replace the original env asset file.
@@ -232,4 +268,8 @@ type InjectDotenvOptions = {
    * })
    */
   babelPlugins?: string[];
+
+  priority?: 'shell' | 'dotenv';
+
+  shellEnvMap?: { [envVar: string]: string };
 };
