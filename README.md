@@ -47,7 +47,7 @@ export default defineConfig({
 
 ## Plugin api
 
-### `sourcePriority`
+### `source`
 Select source of the env variable values
 
 #### `dotenv`
@@ -60,6 +60,7 @@ Use shell environments as source of the env variable values.
 
 ### `inlineGeneratedEnv`
 Inline asset files within `bakeEnv.sh`
+> This is effective only when the `source` is set to `dotenv`
 
 By default, the plugin creates separate asset files for each env.
 These can be used post build to replace the original env asset file.

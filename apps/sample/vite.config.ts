@@ -22,8 +22,8 @@ export default defineConfig({
     vitePluginInjectDotenv({
       input: 'src/env.ts',
       dir: __dirname,
-      inlineGeneratedEnv: true,
-      sourcePriority: 'shell',
+      emitEnvAssetChunks: true,
+      source: 'dotenv',
       shellEnvMap: {
         VITE_API_URL: '___VITE_API_URL'
       }

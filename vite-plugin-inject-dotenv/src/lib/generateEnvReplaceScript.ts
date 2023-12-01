@@ -11,11 +11,11 @@ export function generateEnvReplaceScript(options: {
 TARGET_ENV=$1
 
 if [[ ${envKeys.map((envKey) => '$TARGET_ENV == "' + envKey + '"').join(' || ')} ]]; then
-  echo "Creating $TARGET_ENV"...
+  echo "Creating '$TARGET_ENV'" package ${targetFile}
 else
-  echo Selected env "$TARGET_ENV" not found
+  echo "Selected env '$TARGET_ENV' not found"
   echo "  available env: ${Object.keys(injectableEnvVarsCache)
-    .map((fileName) => `${fileName}`)
+    .map((fileName) => `'${fileName}'`)
     .join(', ')}"
   exit 1
 fi

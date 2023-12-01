@@ -103,10 +103,15 @@ export function vitePluginInjectDotenv(options: InjectDotenvOptions): Plugin {
        */
       const outputPath = path.resolve(root, outDir);
       const bakeScriptName = options.bakeEnvScriptFileName || 'bakeEnv.sh';
-      if (options.inlineGeneratedEnv) {
-        const sourcePriority = options.sourcePriority || 'dotenv';
-        switch (sourcePriority) {
-          case 'dotenv':
+
+      const source = options.source || 'dotenv';
+      switch (source) {
+        case 'dotenv':
+          if (!options.emitEnvAssetChunks) {
+            /**
+             * Keep all env variables for all environments in the script file itself.
+             * Output: a `bakeEnv.sh` file which can be used to inject env variables for each env.
+             */
             fs.writeFileSync(
               outputPath + '/' + bakeScriptName,
               generateScriptFromSourceDotenv({
@@ -114,70 +119,74 @@ export function vitePluginInjectDotenv(options: InjectDotenvOptions): Plugin {
                 injectableEnvFileCache,
               })
             );
-            break;
-          case 'shell': {
-            const sanitizedShellEnvMap = Object.entries(
-              options.shellEnvMap || {}
-            ).reduce((acc, entry) => {
-              const [envVarName, shellVarName] = entry;
-              acc[envVarName] = `$${shellVarName}`;
-              return acc;
-            }, {} as EnvVar);
-
-            const defaultEnvSubstPlaceholders = Object.keys(
-              placeholderEnv
-            ).reduce((acc, key) => {
-              acc[key] = `$${key}`;
-              return acc;
-            }, {} as EnvVar);
-
-            const shellEnvMap = {
-              ...defaultEnvSubstPlaceholders,
-              ...sanitizedShellEnvMap,
-            };
-
-            const shellCodeTemplate = substituteEnvVars(
-              injectableEnvFileCache['raw'].code,
-              shellEnvMap,
-              injectableEnvPlaceholder
+          } else {
+            /**
+             * Generate discrete env files for each env
+             * Output:
+             * - a `bakeEnv.sh` file which can be used to inject env variables for each env.
+             * - discrete source code files for each env. each containing evn vars for its own environment
+             *   i.e. `env-dev.ts`, `env-production.ts`
+             */
+            Object.entries(injectableEnvFileCache).forEach(
+              ([envName, { fileName, code }]) => {
+                if (fileName === 'raw') return;
+                fs.writeFileSync(outputPath + '/' + fileName, code);
+              }
             );
-            fs.writeFileSync(
-              outputPath + '/source_shell-template.js',
-              shellCodeTemplate
-            );
+
+            /**
+             * create bake env script
+             */
             fs.writeFileSync(
               outputPath + '/' + bakeScriptName,
-              generateScriptFromSourceShell({
-                placeholderEnv: placeholderEnv,
+              generateEnvReplaceScript({
                 targetFile: injectableEnvFile,
-                shellEnvMap: options.shellEnvMap,
-                shellCodeTemplateFile: 'source_shell-template.js',
+                injectableEnvVarsCache,
               })
             );
-            break;
           }
-        }
-      } else {
-        /**
-         * Generate injectable env files
-         */
-        Object.entries(injectableEnvFileCache).forEach(
-          ([envName, { fileName, code }]) => {
-            if (fileName === 'raw') return;
-            fs.writeFileSync(outputPath + '/' + fileName, code);
-          }
-        );
+          break;
+        case 'shell': {
+          const sanitizedShellEnvMap = Object.entries(
+            options.shellEnvMap || {}
+          ).reduce((acc, entry) => {
+            const [envVarName, shellVarName] = entry;
+            acc[envVarName] = `$${shellVarName}`;
+            return acc;
+          }, {} as EnvVar);
 
-        /**
-         * create bake env script
-         */
-        fs.writeFileSync(
-          outputPath + '/' + bakeScriptName,
-          generateEnvReplaceScript({
-            targetFile: injectableEnvFile,
-            injectableEnvVarsCache,
-          })
-        );
+          const defaultEnvSubstPlaceholders = Object.keys(
+            placeholderEnv
+          ).reduce((acc, key) => {
+            acc[key] = `$${key}`;
+            return acc;
+          }, {} as EnvVar);
+
+          const shellEnvMap = {
+            ...defaultEnvSubstPlaceholders,
+            ...sanitizedShellEnvMap,
+          };
+
+          const shellCodeTemplate = substituteEnvVars(
+            injectableEnvFileCache['raw'].code,
+            shellEnvMap,
+            injectableEnvPlaceholder
+          );
+          fs.writeFileSync(
+            outputPath + '/source_shell-template.js',
+            shellCodeTemplate
+          );
+          fs.writeFileSync(
+            outputPath + '/' + bakeScriptName,
+            generateScriptFromSourceShell({
+              placeholderEnv: placeholderEnv,
+              targetFile: injectableEnvFile,
+              shellEnvMap: options.shellEnvMap,
+              shellCodeTemplateFile: 'source_shell-template.js',
+            })
+          );
+          break;
+        }
       }
     },
     generateBundle(_, bundle) {
@@ -262,7 +271,7 @@ type InjectDotenvOptions = {
    * With this option set to true, No separate asset files are generated.
    * All asset file contents for each env are placed within `bakeEnv.sh` file.
    */
-  inlineGeneratedEnv?: boolean;
+  emitEnvAssetChunks?: boolean;
 
   /**
    * babel plugins to compile env chunk
@@ -279,7 +288,7 @@ type InjectDotenvOptions = {
    * Pick your choice for source for the env variables.
    * Applicable only when `inlineGeneratedEnv` is true
    */
-  sourcePriority?: 'shell' | 'dotenv';
+  source?: 'shell' | 'dotenv';
 
   /**
    * Mapping between shell env variable and env vars used in code.
