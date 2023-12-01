@@ -2,8 +2,16 @@
 
 <p align="center">
   A Vite plugin to inject env variables into a selected source file after the build. This
-allows us to create customize build for a given deployment env without performing a full build.
+allows us to customize build for a given deployment env without performing a full build.
 </p>
+
+# How it works
+Enables env variables substitution into your asset bundle.
+The substitution is done by a shell script which is generated as part of
+the build artefact.
+
+> Requirement: The script uses `.env.example` file as source of truth for
+which variables should be tracked for substitution.
 
 ## Install
 
@@ -16,61 +24,62 @@ npm i vite-plugin-inject-dotenv -D
 In `vite.config.ts`:
 
 ```ts
-import { defineConfig } from 'vite'
-import vitePluginInjectDotenv from 'vite-plugin-inject-dotenv'
+// vite.config.ts
+import { defineConfig, Plugin } from 'vite';
+import { vitePluginInjectDotenv } from 'vite-plugin-inject-dotenv';
 
 export default defineConfig({
-  plugins: [vitePluginInjectDotenv({
+  ...
+    plugins: [
+  ...,
+  vitePluginInjectDotenv({
     input: 'src/env.ts',
-  })]
-})
+    dir: __dirname,
+    sourcePriority: 'shell',
+    inlineGeneratedEnv: true,
+    shellEnvMap: {
+      VITE_API_URL: '___VITE_API_URL'
+    }
+  }) as Plugin
+],
+});
 ```
 
-## Options
+## Plugin api
 
-```ts
-type InjectDotenvOptions = {
-  /**
-   * source file using env vars. 
-   * Supports: both `import.meta.env` and `process.env` formats
-   */
-  input: string;
+### `sourcePriority`
+Select source of the env variable values
 
-  /**
-   * name used to create the asset file for source file provided in `options.input`
-   * default: 'inject-env-[hash].js'
-   */
-  injectFileName?: string;
+#### `dotenv`
+(default)
+Use custom `.env.*` _e.g. (`.env.uat`, `.env.prod`)_ files for each target
+environment
 
-  /**
-   * folder containing all `.env` files
-   * defaults to project root
-   */
-  dir?: string;
+#### `shell`
+Use shell environments as source of the env variable values.
 
-  /**
-   * name of the bash script generated which can used to create custom assets for given env
-   * default: `bakeEnv.sh`
-   */
-  bakeEnvScriptFileName?: string;
+### `inlineGeneratedEnv`
+Inline asset files within `bakeEnv.sh`
 
-  /**
-   * Inline asset files within `bakeEnv.sh`
-   *
-   * By default, the plugin creates separate asset files for each env.
-   * These can be used post build to replace the original env asset file.
-   *
-   * With this option set to true, No separate asset files are generated.
-   * All asset file contents for each env are placed within `bakeEnv.sh` file.
-   */
-  inlineGeneratedEnv?: boolean;
-};
+By default, the plugin creates separate asset files for each env.
+These can be used post build to replace the original env asset file.
 
+With this option set to true, No separate asset files are generated.
+All asset file contents for each env are placed within `bakeEnv.sh` file.
+
+### `babelPlugins`
+babel plugins to compile env chunk
+
+```
+vitePluginInjectDotenv({
+  input: 'src/env.ts',
+  babelPlugins: ['@babel/plugin-transform-typescript']
+})
 ```
 
 ## Example
 
-Check `apps/sample` for a working example in a a react project
+See `apps/sample` for a working example in a a react project
 
 ## License
 
